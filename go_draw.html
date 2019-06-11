@@ -1,0 +1,1364 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="js/go.js"></script>
+    <script src="js/nodeWarnKeyMap.js"></script>
+    <script src="js/DrawCommandHandler.js"></script>
+    <script src="js/boot.js"></script>
+    <script src="js/jquery.colorpicker.js"></script>
+    <script>
+        //escape展示编辑按钮
+        document.onkeydown = function () {
+            if (window.event && window.event.keyCode == 27) {
+                showToolBar();
+            }
+        }
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>绘图管理页面</title>
+    <meta name="description" content="Interactive flowchart diagram implemented by GoJS in JavaScript for HTML."/>
+    <meta charset="UTF-8">
+    <script id="code">
+        //画板
+        var myPalette;
+        //rgb(293,197,69) 橙色
+
+        //颜色配置
+        var colorConfig = {
+            text:'white',
+            port:'white',
+            linkColor:'rgb(293,197,69)'
+        };
+
+        //全局变量
+        var defaultTextBlockNum = 1;
+
+        //默认图片和字
+        var defaultNode = {
+            category: "picText",
+            src: "img/HS1.png",
+            desc1: "待填写",
+            imgHeight: 65,
+            imgWidth: 65,
+            font: "18px SimHei",
+            stroke: colorConfig['text'],
+            zOrder:1
+        };
+
+         //默认图片和字
+        var defaultWarn = {
+            category: "warnLight",
+            src: "img/warn1.png",
+            imgHeight: 65,
+            imgWidth: 65,
+            zOrder:1
+        };
+
+        //默认椭圆
+        var defaultEllipse = {
+            category:"ellipse",
+            color:"black",
+            strokeWidth:1,
+            strokeDashArray:[0,0],
+            zOrder:1
+        }
+
+        //默认矩形
+        var defaultRectangle = {
+            category:"rectangle",
+            color:"rgb(0,72,171)",
+            strokeWidth:2,
+            strokeDashArray:[20,20],
+            zOrder:1
+        }
+
+        //默认线
+        var defaultLine = {
+            category:'line',
+            strokeWidth:1,
+            strokeDashArray:[0,0],
+            zOrder:1
+        }
+
+        //文本框
+        var textBoxNode = {
+            category: "TextBox",
+            desc1: "待填写",
+            font: "18px SimHei",
+            stroke:colorConfig['text'],
+            zOrder:1
+        };
+
+        //GoJs 事件，样式配置
+        function init() {
+
+            //操作符
+            var $$ = go.GraphObject.make;
+
+            myPalette =
+                $$(go.Diagram, "myPaletteDiv",
+                    {
+                        initialContentAlignment: go.Spot.TopLeft,
+                        allowDrop: true,  // must be true to accept drops from the Palette
+                        allowVerticalScroll : true,
+                        allowHorizontalScroll : true,
+                        hasVerticalScrollbar: true,
+                        hasHorizontalScrollbar: true,
+                        "LinkDrawn": showLinkLabel,  // this DiagramEvent listener is defined below
+                        "LinkRelinked": showLinkLabel,
+                        "animationManager.duration": 800, // slightly longer than default (600ms) animation
+                        "undoManager.isEnabled": true,  // enable undo & redo
+                        scale:1.3400956406250004,
+                        commandHandler: new DrawCommandHandler()  // defined in DrawCommandHandler.js
+                    });
+
+            //线模板
+            myPalette.linkTemplate = $$(go.Link,
+                {
+                    relinkableFrom: true, relinkableTo: true, reshapable: true
+                },
+                $$(go.Shape,{ strokeWidth: 2, stroke: colorConfig['linkColor'], name:'ellipse'},
+                    new go.Binding("stroke","color").makeTwoWay(),
+                    new go.Binding("strokeWidth").makeTwoWay())
+            );
+
+            function showLinkLabel(e) {
+                var label = e.subject.findObject("LABEL");
+                if (label !== null) label.visible = true;
+            }
+
+            //通用绑定
+            function nodeBind(newText) {
+                if (arguments.length == 0) {
+                    return [
+                        new go.Binding("text").makeTwoWay(),
+                        new go.Binding("font").makeTwoWay(),
+                        new go.Binding("stroke").makeTwoWay(),
+                        new go.Binding("fill").makeTwoWay(),
+                    ];
+                } else {
+                    return [
+                        new go.Binding("text", newText).makeTwoWay(),
+                        new go.Binding("font").makeTwoWay(),
+                        new go.Binding("stroke").makeTwoWay(),
+                        new go.Binding("fill").makeTwoWay(),
+                    ];
+                }
+            }
+
+            //通用textbox样式绑定
+            function textBoxBind(textname) {
+                return [
+                    {
+                        margin: 5,
+                        stroke: "black",
+                        font: "18px SimHei",
+                        editable: true,
+                        name: "desc1"
+                    },
+                    new go.Binding("text",textname).makeTwoWay(),
+                    new go.Binding("font").makeTwoWay(),
+                    new go.Binding("stroke").makeTwoWay(),
+                    new go.Binding("fill").makeTwoWay(),
+                ];
+            }
+
+            function nodeStyle() {
+                return [
+                    new go.Binding("location", "loc", go.Point.parse).makeTwoWay(go.Point.stringify),
+                    {
+                        locationSpot: go.Spot.Center,
+                        resizable: true,
+                        rotatable: true,
+                        mouseEnter: function (e, obj) {
+                            showPorts(obj.part, true);
+                        },
+                        mouseLeave: function (e, obj) {
+                            showPorts(obj.part, false);
+                        }
+                    },
+                    new go.Binding("width").makeTwoWay(),
+                    new go.Binding("height").makeTwoWay(),
+                    new go.Binding("angle").makeTwoWay(),
+                    new go.Binding("zOrder").makeTwoWay()
+                ];
+            }
+
+            function makePort(name, spot, output, input) {
+                // the port is basically just a small circle that has a white stroke when it is made visible
+                return $$(go.Shape, "Circle",
+                    {
+                        fill: "transparent",
+                        stroke: null,  // this is changed to "white" in the showPorts function
+                        desiredSize: new go.Size(8, 8),
+                        alignment: spot, alignmentFocus: spot,  // align the port on the main Shape
+                        portId: name,  // declare this object to be a "port"
+                        fromSpot: spot, toSpot: spot,  // declare where links may connect at this port
+                        fromLinkable: true, toLinkable: true,  // declare whether the user may draw links to/from here
+                        cursor: "pointer"  // show a different cursor to indicate potential link point
+                    });
+            }
+
+            function showPorts(node, show) {
+                var diagram = node.diagram;
+                if (!diagram || diagram.isReadOnly || !diagram.allowLink) return;
+                node.ports.each(function (port) {
+                    port.stroke = (show ? colorConfig['port'] : null);
+                });
+            }
+
+            // *************************** node样式 *********************//
+            //线
+            myPalette.nodeTemplateMap.add("line",
+                $$(go.Node,  "Auto", [
+                        new go.Binding("location", "loc", go.Point.parse).makeTwoWay(go.Point.stringify),
+                        {
+                            locationSpot: go.Spot.Center,
+                            resizable: true,
+                            rotatable: true
+                        },
+                        new go.Binding("angle").makeTwoWay(),
+                        new go.Binding("zOrder").makeTwoWay()
+                    ],
+                    { locationSpot: go.Spot.Center},
+                    new go.Binding("location", "loc", go.Point.parse),
+                    $$(go.Shape, "MinusLine",
+                        { fill: "transparent", desiredSize: new go.Size(50, 50), name: 'ellipse'},
+                        new go.Binding("stroke", "color").makeTwoWay(),
+                        new go.Binding("fill", "color").makeTwoWay(),
+                        new go.Binding("strokeWidth", "strokeWidth").makeTwoWay(),
+                        new go.Binding("strokeDashArray", "strokeDashArray").makeTwoWay(),
+                        new go.Binding("desiredSize", "size").makeTwoWay())
+                )
+            );
+
+            //节点椭圆
+            myPalette.nodeTemplateMap.add("ellipse",
+                $$(go.Node,  "Auto", [
+                        new go.Binding("location", "loc", go.Point.parse).makeTwoWay(go.Point.stringify),
+                        {
+                            locationSpot: go.Spot.Center,
+                            resizable: true,
+                            rotatable: true
+                        },
+                        new go.Binding("angle").makeTwoWay(),
+                        new go.Binding("zOrder").makeTwoWay()
+                    ],
+                { locationSpot: go.Spot.Center},
+                new go.Binding("location", "loc", go.Point.parse),
+                $$(go.Shape, "Ellipse",
+                    { fill: "transparent", desiredSize: new go.Size(50, 50), name: 'ellipse'},
+                    new go.Binding("stroke", "color").makeTwoWay(),
+                    new go.Binding("strokeWidth", "strokeWidth").makeTwoWay(),
+                    new go.Binding("strokeDashArray", "strokeDashArray").makeTwoWay(),
+                    new go.Binding("desiredSize", "size").makeTwoWay())
+                )
+            );
+
+            //矩形
+            myPalette.nodeTemplateMap.add("rectangle",
+                $$(go.Node, "Auto", [
+                        new go.Binding("location", "loc", go.Point.parse).makeTwoWay(go.Point.stringify),
+                        {
+                            locationSpot: go.Spot.Center,
+                            resizable: true,
+                            rotatable: true
+                        },
+                        new go.Binding("angle").makeTwoWay(),
+                        new go.Binding("zOrder").makeTwoWay()
+                    ],
+                    { locationSpot: go.Spot.Center},
+                    new go.Binding("location", "loc", go.Point.parse),
+                    $$(go.Shape, "Rectangle",
+                        { fill: "transparent", desiredSize: new go.Size(50, 50), name: 'ellipse'},
+                        new go.Binding("stroke", "color").makeTwoWay(),
+                        new go.Binding("strokeWidth", "strokeWidth").makeTwoWay(),
+                        new go.Binding("strokeDashArray", "strokeDashArray").makeTwoWay(),
+                        new go.Binding("desiredSize", "size").makeTwoWay())
+                )
+            );
+
+            //文本框
+            myPalette.nodeTemplateMap.add("TextBox",
+                $$(go.Node, "Table", nodeStyle(),
+                    makePort("T", go.Spot.Top, true, true),
+                    makePort("T2", go.Spot.TopLeft, true, true),
+                    makePort("T3", go.Spot.TopRight, true, true),
+                    $$(go.TextBlock, textBoxBind("desc1")),
+                    makePort("R", go.Spot.Right, true, true),
+                    makePort("L", go.Spot.Left, true, true),
+                    makePort("B", go.Spot.BottomLeft, true, true),
+                    makePort("B1", go.Spot.Bottom, true, true),
+                    makePort("B2", go.Spot.BottomRight, true, true)
+                )
+            );
+
+            //一个图片一行字体
+            myPalette.nodeTemplateMap.add("picText",
+                $$(go.Node, "Table", nodeStyle(),
+                    makePort("T", go.Spot.Top, true, true),
+                    makePort("T2", go.Spot.TopLeft, true, true),
+                    makePort("T3", go.Spot.TopRight, true, true),
+                    $$(go.Picture,
+                        {margin: 10, width: 65, height: 65, name:'img', column:0},
+                        new go.Binding("source", "src").makeTwoWay(),new go.Binding("width","imgWidth").makeTwoWay(), new go.Binding("height","imgHeight").makeTwoWay()),
+                    makePort("R", go.Spot.Right, true, true),
+                    makePort("L", go.Spot.Left, true, true),
+                    $$(go.TextBlock, "待填写",
+                        {margin: 5, stroke: "black", font: "18px SimHei", editable: true, name:"desc1", row:1, column:0},
+                        nodeBind("desc1")),
+                    makePort("B", go.Spot.BottomLeft, true, true),
+                    makePort("B1", go.Spot.Bottom, true, true),
+                    makePort("B2", go.Spot.BottomRight, true, true)
+                )
+            );
+
+            //报警灯
+            myPalette.nodeTemplateMap.add("warnLight",
+                $$(go.Node, "Table", nodeStyle(),
+                    makePort("T", go.Spot.Top, true, true),
+                    makePort("T2", go.Spot.TopLeft, true, true),
+                    makePort("T3", go.Spot.TopRight, true, true),
+                    $$(go.Picture,
+                        {margin: 10, width: 65, height: 65, name:'img', column:0},
+                        new go.Binding("source", "src").makeTwoWay(),new go.Binding("width","imgWidth").makeTwoWay(), new go.Binding("height","imgHeight").makeTwoWay()),
+                    makePort("R", go.Spot.Right, true, true),
+                    makePort("L", go.Spot.Left, true, true),
+                    makePort("B", go.Spot.BottomLeft, true, true),
+                    makePort("B1", go.Spot.Bottom, true, true),
+                    makePort("B2", go.Spot.BottomRight, true, true)
+                )
+            );
+
+            //一个图片，背景，两个文字
+            myPalette.nodeTemplateMap.add("Test",
+                $$(go.Node, "Auto", nodeStyle(),
+                    $$(go.Shape, "RoundedRectangle", {
+                        strokeWidth: 0,
+                        fill: "#53d7a0",
+                        name: "SHAPE"
+                    }, nodeBind(), new go.Binding("opacity").makeTwoWay()),
+                    $$(go.Panel, "Vertical", {name: "content"},
+                        $$(go.Panel, "Spot",
+                            {scale: 2, margin: 4},
+                            $$(go.Shape, "Circle", {width: 30, strokeWidth: 0, fill: '#FFF'}),
+                            $$(go.Panel, "Spot",
+                                {isClipping: true},
+                                $$(go.Shape, "Circle", {width: 30, strokeWidth: 0}),
+                                $$(go.Picture,
+                                    {width: 30, height: 30}, new go.Binding("source", "src").makeTwoWay()
+                                )
+                            )
+                        ),
+                        $$(go.TextBlock, "待填写", {
+                            margin: 0,
+                            stroke: "white",
+                            font: "bold 18px sans-serif",
+                            editable: true,
+                            name: "desc1"
+                        }, nodeBind("desc1")),
+                        $$(go.TextBlock, "待填写", {
+                            margin: 0,
+                            stroke: "white",
+                            font: "bold 18px sans-serif",
+                            editable: true,
+                            name: "desc2"
+                        }, nodeBind("desc2"))
+                    )
+                ));
+
+            //圆形,字体备注
+            myPalette.nodeTemplateMap.add("Start",
+                $$(go.Node, "Spot", nodeStyle(),
+                    $$(go.Panel, "Auto",
+                        $$(go.Shape, "Circle",
+                            {
+                                minSize: new go.Size(40, 40),
+                                fill: "#79C900",
+                                stroke: null,
+                                name: "SHAPE"
+                            }, nodeBind(), new go.Binding("opacity").makeTwoWay()),
+                        $$(go.TextBlock, "Start",
+                            {font: "bold 11pt Helvetica, Arial, sans-serif", stroke: 'whitesmoke', name: "desc1"},
+                            nodeBind())
+                    )
+                ));
+
+            //圆形,字体备注
+            myPalette.nodeTemplateMap.add("End",
+                $$(go.Node, "Spot", nodeStyle(),
+                    $$(go.Panel, "Auto",
+                        $$(go.Shape, "Circle",
+                            {
+                                minSize: new go.Size(40, 40),
+                                fill: "#DC3C00",
+                                stroke: null,
+                                name: "SHAPE"
+                            }, nodeBind(), new go.Binding("opacity").makeTwoWay()),
+                        $$(go.TextBlock, "End",
+                            {font: "bold 11pt Helvetica, Arial, sans-serif", stroke: 'whitesmoke', name: "desc1"},
+                            nodeBind())
+                    )
+                ));
+
+
+            defaultEllipse.size = new go.Size(30, 50);
+            //默认节点
+            myPalette.model = new go.GraphLinksModel([
+                defaultNode,
+                defaultEllipse,
+                textBoxNode,
+                defaultRectangle,
+                defaultLine,
+                defaultWarn
+            ]);
+
+            //清除边框
+            $("canvas").css({border: "0px", outline: "none"});
+
+            //添加切换选中事件
+            myPalette.addDiagramListener("ChangedSelection", function (e) {
+                var node = e.diagram.selection.first();
+                //点击空白地区清空属性区
+                if (node == undefined || node == null) {
+                    return false;
+                }
+
+                var curNode = node.data;
+                var fontSize = curNode.font;
+                var fontStroke = curNode.stroke
+                var imgHeight = curNode.imgHeight;
+                var imgWidth = curNode.imgWidth;
+                var desc = curNode.desc1;
+                var zOrder = curNode.zOrder;
+                var strokeWidth = curNode.strokeWidth;
+                var src = curNode.src;
+                var dash = curNode.strokeDashArray;
+                //字体大小
+                mini.get("fontSize").setValue(fontSize == undefined ? 0 : fontSize);
+                //字体颜色
+                mini.get("textColorSel").setValue(fontStroke == undefined ? 0 : fontStroke);
+                //图片高度
+                mini.get("imgHeight").setValue(imgHeight == undefined ? 0 : imgHeight);           
+                //图片宽度
+                mini.get("imgWidth").setValue(imgWidth == undefined ? 0 : imgWidth);
+                //字间距
+                if (desc != undefined) {
+                    var spaceCount = desc.split(/\s+/).length - 1;
+                    mini.get("fontSpace").setValue(spaceCount);
+                }
+                //图片地址
+                if(src != undefined){
+                    mini.get("localPic").setValue(src);
+                }
+                //线宽
+                mini.get("lineWidth").setValue(strokeWidth == undefined ? 0 : strokeWidth);
+                //层级
+                mini.get("zOrder").setValue(zOrder == undefined ? 0 : zOrder);
+                //虚线
+                mini.get("dashLine").setValue(dash == undefined ? 0 : dash[0]);
+            });
+
+            //尺寸变动时自动图片大小适应边框大小
+            myPalette.addDiagramListener("PartResized", function (e) {
+                debugger;
+                var node = e.diagram.selection.first();
+                //点击空白地区清空属性区
+                if (node == undefined || node == null) {
+                    return false;
+                }
+                var height = node.height;
+                var width = node.width;
+                //此功能不支持默认非组图片文本组使用
+                if(node.data.category == "picText" || node.data.category == 'warnLight'){              
+                    var img = node.findObject('img');
+                    if(img != null){
+                        img.width = width-50;
+                        img.height = height-50;
+                    }
+                    return true;
+                }
+                var img = node.findObject("ellipse");
+                if(img != null){
+                    img.width = width-1;
+                    img.height = height-1;
+                    return true;
+                }
+            });
+        }
+
+        //保存到localStorage
+        save = function(){
+            var val = mini.get("palNameId").getValue();
+            if(IsEmpty(val)){
+                mini.alert("请输入画板名称!");
+                return;
+            }
+            var json = myPalette.model.toJson();
+            var palletes = JSON.parse(localStorage.getItem("palletes")) || {};
+            palletes[val] = json;
+            localStorage.setItem("palletes",JSON.stringify(palletes));
+            loadAllPallete();
+        }
+
+        //加载选择的画板
+        loadSelectedBoard = function(e){
+            var val = e.value;
+            mini.get("palNameId").setValue(val);
+            var palletes = JSON.parse(localStorage.getItem("palletes"));
+            myPalette.model = go.Model.fromJson(palletes[val]);
+        }
+
+        //是否为空
+        IsEmpty = function(val){
+            if (typeof (val) == 'undefined') return true;
+                if (val == null || val == "null" || val == "undefined") return true;
+                if ((val + "").replace(/　/g, "").trim() == "") return true;
+                return false;
+        }
+
+        //报警灯动画
+        var flag = false;
+        setInterval(function(){
+            flag = !flag;
+            if(flag){
+                var it = myPalette.findNodesByExample({'category':'warnLight'}).iterator;
+                loopModifyNodesSrc(myPalette,it,"img/warn1.png");
+            }else{
+                var it = myPalette.findNodesByExample({'category':'warnLight'}).iterator;
+                loopModifyNodesSrc(myPalette,it,"img/warn2.png");
+            }      
+        },600);
+
+        var associateMap = {};
+        //建立报警灯和图上节点的关联关系
+        function handleAssociate(){
+            var it = myPalette.selection.iterator;
+            var warnLight = {};
+            var picText = {};
+            while(it.next()){
+                var node = it.value;
+                var data = node.data;
+                if(!(node instanceof go.Node)){
+                    return;
+                }else{
+                    if(data.category == 'picText'){
+                        picText = data;
+                    }
+                    if(data.category == 'warnLight'){
+                        warnLight = data;
+                    }
+                }
+            }
+            //var picKey = picText.key;
+            //var warnKey = warnLight.key;
+            //associateMap[picKey] = {picKey:picText,warnKey:warnLight};
+            associateMap[picText.key]=warnLight.key;
+        }
+
+        //展示节点
+        function showNode(key){
+            myPalette.findNodeForKey(key).visible = true;
+        }
+
+        //隐藏节点
+        function hideNode(key){
+            myPalette.findNodeForKey(key).visible = false;
+        }
+
+        //获取节点
+        function getNode(key){
+            return myPalette.findNodeForKey(key);
+        }
+
+        //根据节点属性查找节点
+        function findNodesByAttr(obj,callback){
+            var it = myPalette.findNodesByExample(obj).iterator;
+            while(it.next()){
+                var node = it.value;
+                var data = node.data;
+                if(callback != undefined && typeof callback === 'function'){
+                    callback(node);
+                }                    
+            }
+        }
+
+        //展示灯
+        function displayWarnLight(e){
+            findNodesByAttr(e,function(node){
+                getNode(nodeWarnKeyMap[node.data.key]).visible = true;
+            });
+        }
+
+        //隐藏灯
+        function hideWarnLight(e){
+            findNodesByAttr(e,function(node){
+                getNode(nodeWarnKeyMap[node.data.key]).visible = false;
+            });
+        }
+    </script>
+</head>
+<body style="width:99%;height:94%;">
+<div class="mini-toolbar" id="WsdMainToolBar">
+    <table style="width:100%;height:100%;">
+        <tr>
+            <td style="width:100%;height:100%;">
+                <a class="mini-button" iconcls="icon-save" onclick="save()" id="_canvasSave">画板保存</a>
+                <a id="uploadRectangle" class="mini-button" iconcls="icon-upload" enabled="true" onclick="addRectangle()">新增矩形</a>
+                <a id="uploadLine" class="mini-button" iconcls="icon-upload" enabled="true" onclick="addLine()">新增线</a>
+                <a id="uploadEllipse" class="mini-button" iconcls="icon-upload" enabled="true" onclick="addEllipse()">新增椭圆</a>
+                <a id="uploadTextbox" class="mini-button" iconcls="icon-upload" enabled="true" onclick="addTextbox()">新增文本</a>
+                <a id="uploadTextbox" class="mini-button" iconcls="icon-upload" enabled="true" onclick="addPicture()">新增报警灯</a>
+                <a class="mini-button" iconcls="icon-import" id="_ExportJson" onclick="exportJson()">导出json</a>
+                <a class="mini-button" iconcls="icon-export" id="_ImportJson" onclick="importJson()">导入json</a>
+                <a class="mini-button" iconcls="icon-export" id="configBgPicBtn" onclick="bgOpen('win_bg_size')">配置背景长宽</a>
+                <a class="mini-button" iconcls="icon-export" id="configBgColorBtn" onclick="bgOpen('win_bg_back')">配置背景图片和颜色</a>
+                <a id="handleAssociate" class="mini-button" iconcls="icon-upload" enabled="true" onclick="handleAssociate()">节点关联</a>
+                <a class="mini-combobox" id="loadDraft"  style="float:right;" onvaluechanged="loadSelectedBoard" valueField="palName" textField="palName" label="加载画板" emptyText="选择画板"></a>
+                <a class="mini-button" iconcls="icon-export" id="manageOn" style="float:right;" onclick="hideToolBar()">后台隐藏</a>
+            </td>
+        </tr>
+    </table>
+</div>
+<div class="mini-splitter" style="width:100%;height:100%">
+    <div showCollapseButton="false" size="0"></div>
+    <div>
+    <div id="splitter" class="mini-splitter" style="width:100%;height:100%" vertical="false">
+        <div id="bgColorPic" showCollapseButton="false">
+            <!--背景颜色-->
+            <div id="bgDiv" style="height: 2289px; width: 3150px;z-index:0;background:rgb(25,45,72);position:absolute;"></div>
+            <!--背景图片-->
+            <div id="myPaletteDiv" style="height: 2289px; width: 3150px;background:url(../imgs/bg.png) no-repeat;"></div>
+        </div>
+        <div id="palConfig" size="400" showCollapseButton="true">
+            <form>
+                <table style="height:100%;width:100%; margin-top: 25px;" id="attrChangeArea">
+                    <tr>
+                        <td><span style="margin-left: 39px;font-size: 13px;line-height: 26px;"
+                                  id="t_pallete">素材集名称 ：</span>
+                            <input label="素材集名称" name="palName" id="palNameId" class="mini-textbox" style="width:53%;"/></td>
+                    </tr>
+                    <tr>
+                        <td><span style="margin-left: 39px;font-size: 13px;line-height: 26px;margin-right:13px;"
+                                  id="t_imgWidth">图片宽度 ：</span>
+                            <input id="imgWidth" name="imgWidth" class="mini-spinner" format="n0"
+                                   onvaluechanged="imgWidthChange()" maxValue="200" style="width:140px;"/>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><span style="margin-left: 39px;font-size: 13px;line-height: 26px;margin-right:13px;"
+                                  id="t_imgHeight">图片高度 ：</span>
+                            <input id="imgHeight" name="imgHeight" class="mini-spinner" format="n0"
+                                   onvaluechanged="imgHeightChange()" maxValue="200" style="width:140px;"/>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><span style="margin-left: 39px;font-size: 13px;line-height: 26px;margin-right:15px;"
+                                  id="spMenuColor">背景颜色 ：</span><input
+                                id="menuColorSel" type="text"/></td>
+                        <td><input id="menuColor" name="menuColor" class="mini-textbox" style="display: none"/></td>
+                    </tr>
+                    <tr>
+                        <td><span style="margin-left: 39px;font-size: 13px;line-height: 26px;margin-right:16px;"
+                                  id="spTextColor">字体颜色 ：</span><input
+                                id="textColorSel" name="textColorSel" class="mini-textbox" type="text"
+                                style="width:38%;"/></td>
+                        <td><input id="textColor" name="textColor" class="mini-textbox" style="display: none"/></td>
+                    </tr>
+                    <tr>
+                        <td><span style="margin-left: 39px;font-size: 13px;line-height: 26px;margin-right:2px;"
+                                  id="spLineColor">连接线颜色 ：</span><input
+                                id="lineColorSel" name="lineColorSel" class="mini-textbox" type="text"
+                                style="width:38%;"/></td>
+                        <td><input id="lineColor" name="lineColor" class="mini-textbox" style="display: none"/></td>
+                    </tr>
+                    <tr>
+                        <td><span style="margin-left: 39px;font-size: 13px;line-height: 26px;margin-right:53px;"
+                                  id="t_dashLine">虚线</span>
+                            <input id="dashLine" name="imgWidth" class="mini-spinner" format="n0"
+                                   onvaluechanged="dashLineArgs" maxValue="200" style="width:140px;"/>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><span style="margin-left: 39px;font-size: 13px;line-height: 26px;"
+                                  id="spLineColorExtend">连接线颜色扩展：</span><input
+                                id="lineColorSelExtend" name="lineColorSel" class="mini-textbox" type="text" emptyText="填写rgb或者#Hex"
+                                style="width:38%;"/></td>
+                        <td>
+                            <div class="mini-button" onclick="extendLineColor" style="position:relative;left:-66px;">提交</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><span style="margin-left: 39px;font-size: 13px;line-height: 26px;margin-right:48px;"
+                                  id="t_lineWidth">线宽:</span>
+                            <input id="lineWidth" name="lineWidth" class="mini-spinner" format="n0"
+                                   onvaluechanged="lineWidthChange" maxValue="200" style="width:140px;"/>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span style="margin-left: 39px;font-size: 13px;line-height: 26px;margin-right: 9px;">字体大小 ：</span>
+                            <input id="fontSize" name="fontSize" class="mini-spinner" format="n0"
+                                   onvaluechanged="spinChange" maxValue="200" style="width:140px;"/>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span style="margin-left: 39px;font-size: 13px;line-height: 26px;margin-right: 10px;">字间距离 ：</span>
+                            <input id="fontSpace" name="fontSpace" class="mini-spinner" format="n0"
+                                   onvaluechanged="fontSpaceSpin" maxValue="50" style="width:140px;"/>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span style="margin-left: 39px;font-size: 13px;line-height: 26px;margin-right: 35px;">层级 ：</span>
+                            <input id="zOrder" name="zOrder" class="mini-spinner" format="n0" 
+                                   onvaluechanged="zOrderSpin" maxValue="50" style="width:140px;"/>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span style="margin-left: 39px;font-size: 13px;line-height: 26px;">节点图片路径：</span>
+                            <input id="localPic" name="localPic" emptyText="填写相对路径" class="mini-textbox" style="width:140px;"/>
+                        </td>
+                        <td>
+                            <div class="mini-button" onclick="uploadLocalPic()" style="position:relative;left:-66px;">提交</div>
+                        </td>
+                    </tr>
+                     <tr>
+                       <td>
+                            <span style="margin-left: 39px;font-size: 13px;line-height: 26px;margin-right: 35px;">对齐 ：</span>
+                            <input id="align" name="backcolor" class="mini-combobox"
+                                   data="[{'id':'alignLeft','text':'左'},{'id':'alignTop','text':'上'},{'id':'alignRight','text':'右'},{'id':'alignBottom','text':'下'}]" textfield="text"
+                                   valuefield="id" onvaluechanged="align"/>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <input id="picTextPos" name="backcolor" class="mini-combobox" label="图片文字方位" style="display:none;"
+                                   data="[{'id':'left','text':'左'},{'id':'up','text':'上'},{'id':'right','text':'右'},{'id':'down','text':'下'}]" textfield="text"
+                                   valuefield="id" onvaluechanged="picTextPos()"/>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <input id="backcolor" name="backcolor" class="mini-combobox" label="背景透明度" style="display:none;"
+                                   data="[{'id':'on','text':'不透明'},{'id':'off','text':'透明'}]" textfield="text"
+                                   valuefield="id" onvaluechanged="backOpacity()"/>
+                        </td>
+                    </tr>
+                </table>
+            </form>
+        </div>
+    </div>
+    </div>
+</div>
+<!--背景图片长宽-->
+<div id="win_bg_size" class="mini-window" title="背景宽高配置" height="170" width="300">
+    <div id="bgFormSize">
+        <table>
+            <tr>
+                <td>                   
+                    <label for="date1$text">宽 ： </label>
+                </td>
+                <td name="width" class="mini-spinner" required="true" allowLimitValue="false"></td>
+            </tr>
+             <tr>
+                <td>                   
+                    <label for="date1$text">高 : </label>
+                </td>
+                <td name="height" class="mini-spinner" required="true" allowLimitValue="false"></td>
+            </tr>
+        </table>
+    </div>
+    <div style="position:absolute;left:33%;">
+        <div class="mini-button" onclick="bgSizeConfirm()">确定</div>
+        <div class="mini-button" onclick="bgClose('win_bg_size')">关闭</div>
+    </div>
+</div>
+<!--背景图片颜色配置-->
+<div id="win_bg_back" class="mini-window" title="背景图片颜色配置" height="170" width="300">
+    <form id="bgFormBack">
+        <table>
+            <tr>
+                <td>                   
+                    <label for="date1$text">颜色 ： </label>
+                </td>
+                <td name="color" class="mini-textbox"></td>
+            </tr>
+             <tr>
+                <td>                   
+                    <label for="date1$text">图片(相对路径) : </label>
+                </td>
+                <td name="path" class="mini-textbox"></td>
+            </tr>
+        </table>
+    </form>
+    <div style="position:absolute;left:33%;">
+        <div class="mini-button" onclick="bgBackConfirm()">确定</div>
+        <div class="mini-button" onclick="bgClose('win_bg_back')">关闭</div>
+    </div>
+</div>
+<script type="text/javascript">
+
+    //编译miniui页面
+    mini.parse();
+
+    //加载所有调色板
+    loadAllPallete = function(){
+        //加载localStorage中存储的调色板
+        var data = localStorage.getItem("palletes");
+        var palMap = JSON.parse(data);
+        var keys = [];
+        for(var key in palMap){
+            keys.push({"palName":key});
+        }
+        mini.get("loadDraft").setData(keys);
+    }
+ 
+    //页面初始化
+    loadAllPallete();
+    //展示MainToolBar
+    $("#WsdMainToolBar").show();
+    //初始化调色板
+    init();
+    //********************配置区******************
+    $("#spMenuColor").hide();
+    $("#menuColorSel").hide();
+    $("#backcolor").hide();
+    //*******************************************
+    
+
+    //隐藏工具栏
+    hideToolBar = function(){
+        mini.get("WsdMainToolBar").hide();
+        mini.get("splitter").hidePane(2);
+        $("#showEditBars").show();
+    }
+
+    showToolBar = function(){
+        mini.get("WsdMainToolBar").show();
+        mini.get("splitter").showPane(2)
+    }
+
+    //注册背景取色器
+    $("#menuColorSel").colorpicker({
+        fillcolor: true,
+        success: function (o, color) {
+            $(o).css("color", color);
+            mini.get("menuColor").setValue(color);
+            //更改node背景颜色
+            myPalette.startTransaction("change color");
+            var it = myPalette.selection.iterator;
+            while (it.next()) {
+                var node = it.value;
+                var shape = node.findObject("SHAPE");
+                if (shape != null) {
+                    shape.fill = color;
+                }
+            }
+            myPalette.commitTransaction("change color");
+        },
+        reset: function (o, color) {
+            mini.get("menuColor").setValue(null);
+        }
+    });
+
+    //注册文字取色器
+    $("#textColorSel").colorpicker({
+        fillcolor: true,
+        success: function (o, color) {
+            $(o).css("color", color);
+            debugger;
+            mini.get("textColorSel").setValue(color);
+            //更改node背景颜色
+            myPalette.startTransaction("change textcolor");
+            var it = myPalette.selection.iterator;
+            while (it.next()) {
+                var node = it.value;
+                for (var i = 1; i <= defaultTextBlockNum; i++) {
+                    var remark = node.findObject("desc" + i);
+                    if (remark != null) {
+                        remark.stroke = color;
+                    }
+                }
+            }
+            myPalette.commitTransaction("change textcolor");
+        },
+        reset: function (o, color) {
+            mini.get("textColor").setValue(null);
+        }
+    });
+
+    //注册线取色器
+    $("#lineColorSel").colorpicker({
+        fillcolor: true,
+        success: function (o, color) {
+            debugger;
+            $(o).css("color", color);
+            debugger;
+            mini.get("lineColorSel").setValue(color);
+            //更改node背景颜色
+            commonModifyLineColor({value:color});
+        },
+        reset: function (o, color) {
+            mini.get("lineColor").setValue(null);
+        }
+    });
+
+    //扩展字颜色
+    extendLineColor = function(){
+        var color = mini.get("lineColorSelExtend").getValue();
+        if(IsEmpty(color)){
+            return;
+        }
+        commonModifyLineColor({value:color});
+    }
+
+    //更改线的颜色
+    commonModifyLineColor = function(e){
+        debugger;
+        var color = e.value;
+        myPalette.startTransaction("change linecolor");
+        var it = myPalette.selection.iterator;
+        while (it.next()) {
+            var node = it.value;
+            var link = node.findObject('link');
+            if(link != null){
+                link.stroke = color;
+            }
+            var arrow = node.findObject('arrow');
+            if(arrow != null){
+                arrow.fill = color;
+            }
+            var ellipse = node.findObject('ellipse');
+            if(ellipse != null){
+                ellipse.stroke = color;
+            }
+        }
+        myPalette.commitTransaction("change linecolor");
+    }
+
+    //字体滚动条变化函数
+    spinChange = function (e) {
+        var fontSize = e.value;
+        myPalette.startTransaction("change fontSize");
+        var it = myPalette.selection.iterator;
+        while (it.next()) {
+            var node = it.value;
+            for (var i = 1; i <= defaultTextBlockNum; i++) {
+                var remark = node.findObject("desc" + i);
+                if (remark != null) {
+                    var fontStyle = remark.font.match(/\D/g).join("");
+                    remark.font = fontSize + fontStyle;
+                }
+            }
+            myPalette.commitTransaction("change fontSize");
+        }
+    }
+
+    //字间距调整
+    fontSpaceSpin = function () {
+        var spaceCount = mini.get("fontSpace").getValue();
+        var spaceNew = "";
+        for (var j = 0; j < spaceCount; j++) {
+            spaceNew += " ";
+        }
+        myPalette.startTransaction("change fontSpace");
+        var it = myPalette.selection.iterator;
+        while (it.next()) {
+            var node = it.value;
+            for (var i = 1; i <= defaultTextBlockNum; i++) {
+                var remark = node.findObject("desc" + i);
+                if (remark != null) {
+                    var text = remark.text;
+                    if (text != undefined && text != "") {
+                        remark.text = text.split(/\s*/g).join(spaceNew);
+                    }
+                }
+            }
+            myPalette.commitTransaction("change fontSpace");
+        }
+    }
+
+    //图片宽度
+    imgWidthChange = function () {
+        debugger;
+        var imgWidth = mini.get("imgWidth").getValue();
+        myPalette.startTransaction("change imgWidth");
+        var it = myPalette.selection.iterator;
+        while (it.next()) {
+            var node = it.value;
+            var img = node.findObject("img");
+            if (img != null) {
+                img.width = imgWidth;
+            }
+            var ellipse = node.findObject('ellipse');
+            if(ellipse != null){
+                ellipse.width = imgWidth;
+            }
+            myPalette.commitTransaction("change imgWidth");
+        }
+    }
+
+    //图片高度
+    imgHeightChange = function () {
+        var imgHeight = mini.get("imgHeight").getValue();
+        myPalette.startTransaction("change imgHeight");
+        var it = myPalette.selection.iterator;
+        while (it.next()) {
+            var node = it.value;
+            var img = node.findObject("img");
+            if (img != null) {
+                img.height = imgHeight;
+            }
+            var ellipse = node.findObject('ellipse');
+            if(ellipse != null){
+                ellipse.height = imgHeight;
+            }
+            myPalette.commitTransaction("change imgHeight");
+        }
+    }
+
+    //背景透明度
+    backOpacity = function () {
+        var opacity = mini.get("backcolor").getValue();
+        myPalette.startTransaction("change opacity");
+        var it = myPalette.selection.iterator;
+        while (it.next()) {
+            var node = it.value;
+            var remark = node.findObject("SHAPE");
+            if (remark != null) {
+                if (opacity == 'on') {
+                    remark.opacity = 1.0;
+                } else {
+                    remark.opacity = 0.0;
+                }
+            }
+        }
+        myPalette.commitTransaction("change opacity");
+    }
+
+    //用于生成uuid
+    function S4() {
+        return (((1 + Math.random()) * 0x10000) | 0).toString(16).substring(1);
+    }
+
+    function guid() {
+        return (S4() + S4() + "-" + S4() + "-" + S4() + "-" + S4() + "-" + S4() + S4() + S4());
+    }
+
+    //上传本地图片
+    uploadLocalPic = function(){
+        var localPic = mini.get("localPic").getValue();
+        if(IsEmpty(localPic)){
+            return;
+        }
+        var src = localPic;
+
+        if(myPalette.selection.iterator.next()){
+            //修改图片地址
+            modifyPicSrc(myPalette,src);
+        }else{
+            //没选中就添加图片地址
+            addPicTextNode(myPalette,src);
+        }
+    }
+
+    //修改本地图片
+    function modifyPicSrc(diagram,src){
+        diagram.startTransaction("change src");
+        var it = diagram.selection.iterator;
+        loopModifyNodesSrc(diagram,it,src);
+    }
+
+    //循环修改
+    function loopModifyNodesSrc(diagram,it,src){
+        while (it.next()) {
+            var node = it.value;
+            var img = node.findObject("img");
+            if(img != null){
+                img.source = src;
+            }
+            //myPalette.model.setDataProperty(node, "src", src);
+            diagram.commitTransaction("change src");
+        }
+    }
+
+    //增加(图片文字)节点
+    function addPicTextNode(diagram,src){
+        debugger;
+        //新增node
+        var arr = diagram.model.nodeDataArray;
+        debugger;
+        //获得一个默认的样式
+        var copy_default = mini.clone(defaultNode);
+        //修改key
+        copy_default["key"] = guid();
+        //修改__gohashid
+        copy_default["__gohashid"] = guid();
+        //方便扩展，动态添加文本框
+        for (var i = 1; i <= defaultTextBlockNum; i++) {
+            copy_default["desc" + i] = "待填写";
+        }
+        //修改新增的位置
+        copy_default["loc"] = movex+" "+movey;
+        //修改图片地址
+        copy_default["src"] = src;
+        copy_default["zOrder"] = 1;
+        diagram.startTransaction("make new node");
+        diagram.model.addNodeData(copy_default);
+        diagram.commitTransaction("make new node");
+    }
+
+    //通用新增节点
+    function addCommonNode(diagram,node){
+        node["key"] = guid();
+        node["loc"] = movex+" "+movey;
+        node["zOrder"] = 1;
+        node["__gohashid"] = guid();
+        diagram.model.addNodeData(node);
+        //新增后选中
+        var mapNode = diagram.findNodeForKey(node['key']);
+        diagram.select(mapNode);
+    }
+
+    //新增一个文本框
+    addTextbox = function(){
+        var node = mini.clone(textBoxNode);
+        addCommonNode(myPalette,node);
+    }
+
+    //新增一个矩形
+    addRectangle = function(){
+        var node = mini.clone(defaultRectangle);
+        addCommonNode(myPalette,node);
+    }
+
+    //新增一个线
+    addLine = function(){
+        var node = mini.clone(defaultLine);
+        addCommonNode(myPalette,node);
+    }
+
+    //新增椭圆
+    addEllipse = function(){
+        var node = mini.clone(defaultEllipse);
+        addCommonNode(myPalette,node);
+    }
+
+    //新增报警灯
+    addPicture = function(){
+        var node = mini.clone(defaultWarn);
+        addCommonNode(myPalette,node);
+    }
+
+    //修改图片文字方位
+    picTextPos = function(){
+        var pos = mini.get("picTextPos").getValue();
+        myPalette.startTransaction("change picTextPos");
+        switch(pos){
+            case 'up':
+                modifyUpDownPos(myPalette,{img:1},{desc1:0});
+                break;
+            case 'down':
+                modifyUpDownPos(myPalette,{img:0},{desc1:1});
+                break;
+            case 'left':
+                modifyLeftRightPos(myPalette,{img:0},{desc1:1});
+            case 'right':
+                modifyLeftRightPos(myPalette,{img:1},{desc1:0});
+            default:
+                break;
+        }
+        myPalette.commitTransaction("change picTextPos");
+    }
+
+    //修改位置
+    function modifyUpDownPos(myPalette,o1,o2){
+        var it = myPalette.selection.iterator;
+        while (it.next()) {
+            var node = it.value;
+            var remark = node.findObject("desc1");
+            var img = node.findObject("img");
+            if(img != null){
+                img.row = o1.img;
+            }
+            if(remark != null){
+                remark.row = o2.desc1;
+            }
+        }
+    }
+
+    //修改左右位置
+    function modifyLeftRightPos(myPalette,o1,o2){
+        var it = myPalette.selection.iterator;
+        while (it.next()) {
+            var node = it.value;
+            var remark = node.findObject("desc1");
+            var img = node.findObject("img");
+            if(img != null){
+                img.column = o1.img;
+            }
+            if(remark != null){
+                remark.column = o2.desc1;
+            }
+        }
+    }
+
+    //修改线宽
+    lineWidthChange = function(e){
+        var val = e.value;
+        if(IsEmpty(val)){
+            return;
+        }
+        myPalette.startTransaction("change linewidth");
+        var it = myPalette.selection.iterator;
+        while (it.next()) {
+            var node = it.value;
+            var link = node.findObject('ellipse');
+            if(link != null){
+                link.strokeWidth = val;
+            }
+        }
+        myPalette.commitTransaction("change linewidth");
+    }
+
+    //导入JSON
+    importJson = function () {
+        var tree = mini.get("_ImportJson");
+        if (tree.importJSONWin == null) {
+            tree.importJSONWin = new mini.Window();
+            tree.importJSONWin.setTitle("导入JSON");
+            tree.importJSONWin.setWidth(600);
+            tree.importJSONWin.setHeight(500);
+            tree.importJSONWin.setBody("<div style='width:99%;height:95%;'><textarea style='width:99%;height:95%;'></textarea></div><div style='text-align:center'><input style='width:100px;cursor:pointer' type='button' value='确认' /></div>");
+            $(tree.importJSONWin.el).find("[type='button']").on("click", function () {
+                var val = $(tree.importJSONWin.el).find("textarea").val();
+                if (val == null || val == "") return;
+                try {
+                    var newObj = mini.decode(val);
+                    if (newObj == null) return;
+                    debugger;
+                    myPalette.model = go.Model.fromJson(val);
+                    tree.importJSONWin.hide();
+                }
+                catch (e) {
+                    alert("JSON格式出现问题!");
+                }
+            });
+        }
+        $(tree.importJSONWin.el).find("textarea").val("")[0].focus();
+        tree.importJSONWin.show();
+    }
+
+    //导出
+    exportJson = function () {
+        var tree = mini.get("_ExportJson");
+        if (tree.exportJSONWin == null) {
+            tree.exportJSONWin = new mini.Window();
+            tree.exportJSONWin.setWidth(600);
+            tree.exportJSONWin.setHeight(500);
+            tree.exportJSONWin.setTitle("导入JSON");
+            tree.exportJSONWin.setBody("<div style='width:99%;height:95%;'><textarea style='width:99%;height:95%;' id='txtExportJSON'></textarea></div><div style='text-align:center'><input id='btnExportJSON' style='width:100px;cursor:pointer' type='button' value='关闭' /></div>");
+            $(tree.exportJSONWin.el).find("#btnExportJSON").click(function(){
+               tree.exportJSONWin.hide();
+            });
+        }
+        $(tree.exportJSONWin.el).find("textarea").val(myPalette.model.toJson());
+        tree.exportJSONWin.show();
+    }   
+
+    //配置背景长宽
+    bgOpen = function(e){
+        mini.get(e).show();
+    }
+
+    //背景关闭
+    bgClose = function(e){
+        mini.get(e).hide();
+    }
+
+    //必填校验
+    validate = function(id){
+         var form = new mini.Form(id);
+         var data = form.getData(true, false);
+         form.validate();
+         if (!form.isValid()) {
+            mini.alert("请输入必填项！");
+            return false;
+        }
+         return data;
+    }
+
+    //背景图片配置确认
+    bgSizeConfirm = function(){
+        var result = validate("bgFormSize");
+        if(result){
+            var config = {"height":result['height']+"px","width":result['width']+"px"};
+            $("#myPaletteDiv").css(config);
+            $("#bgDiv").css(config);
+            mini.get("win_bg_size").hide();
+        }
+    }
+
+    //配置背景颜色
+    bgBackConfirm = function(){
+        var result = validate("bgFormBack");
+        if(result){
+            if(result['path'] != "") {
+                var config = {"background":"url("+result["path"]+") no-repeat"};
+                $("#myPaletteDiv").css(config);
+            }
+            if(result['color'] != ""){
+                var config = {"z-index":0,"background":result['color'],"position":"absolute"};
+                $("#bgDiv").css(config);
+            }
+            mini.get("win_bg_back").hide();
+        }
+    }
+
+     //层级
+    zOrderSpin = function(e){
+        var val = e.value;
+        myPalette.startTransaction("change zOrder");
+        var it = myPalette.selection.iterator;
+        while (it.next()) {
+            var node = it.value;
+            myPalette.model.setDataProperty(node, "zOrder", val);
+            myPalette.commitTransaction("change zOrder");
+        }
+    }
+
+    //对齐命令
+    align = function(e){
+        var val = e.value;
+        eval("myPalette.commandHandler."+val+"()");
+    }
+
+    //调节虚线
+    dashLineArgs = function(e){
+        var val = e.value;
+        myPalette.startTransaction("change dashLine");
+        var it = myPalette.selection.iterator;
+        while (it.next()) {
+            var node = it.value;
+            var line = node.findObject('ellipse');
+            if(line != null){
+                line.strokeDashArray[0] = val;
+                line.strokeDashArray[1] = val;
+            }
+        }
+        myPalette.commitTransaction("change dashLine");
+    }
+
+    //根据鼠标点击位置生成节点
+    var movex = 0;
+    var movey = 0;
+    // $("#myPaletteDiv").click(function(e){
+    //     movex = e.pageX;
+    //     movey = e.pageY
+    // });
+</script>
+</body>
+</html>
